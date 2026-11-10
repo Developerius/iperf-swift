@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  test:
+    name: Test (macOS)
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      # openssl@3 is required by the RSA auth interoperability tests, which
+      # shell out to the Homebrew openssl CLI to generate credentials; it is
+      # not used for building (OpenSSL comes from the openssl-spm XCFramework).
+      - name: Install test dependencies
+        run: brew install iperf3 openssl@3
+      - name: Build
+        run: swift build
+      # The DocC catalog and doc comments contain many ``symbol`` links that a
+      # rename breaks silently; fail the build on any unresolved link.
+      - name: Build documentation
+        run: swift package generate-documentation --target IperfSwift --warnings-as-errors
+      - name: Run tests
+        run: swift test
+      # HAVE_SSL is hardcoded on, so the no-SSL fallback in custom.c is never
+      # compiled by swift build/test. Exercise it directly so the unconditional
+      # RSA-validation declarations can never regress into a link failure.
+      - name: Verify no-SSL RSA-validation stubs
+        run: ./Scripts/verify_no_ssl_stubs.sh
+
+  build:
+    name: Build (${{ matrix.platform }})
+    runs-on: macos-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [iOS, tvOS]
+    steps:
+      - uses: actions/checkout@v5
+      # Verify the declared-supported platforms compile. Running the test
+      # suite there needs a simulator/host; a build is the cheap guard.
+      - name: Build for ${{ matrix.platform }}
+        run: xcodebuild -scheme IperfSwift -destination 'generic/platform=${{ matrix.platform }}' build
